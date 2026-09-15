@@ -24,6 +24,11 @@ import {
     MessageCircle
 } from "lucide-react";
 
+// Admin panelida yozilgan bildirishnomalarni o'qish/tinglash uchun.
+// Fayl joylashuvi: src/utils/notifications.js
+// (loyihangizdagi papka tuzilishiga qarab shu importni moslang, masalan "../utils/notifications")
+import { getNotifications, subscribeToNotifications, markAllAsRead } from "./utils/notifications";
+
 
 function DiscountTag({ children, className = "" }) {
     return (
@@ -263,6 +268,10 @@ function Home() {
     const [isFavoritesOpen, setIsFavoritesOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
+    // Bildirishnomalar endi statik emas — admin panelidan yozilganlar shu yerda
+    // localStorage orqali saqlanadi va real vaqtda ko'rinadi.
+    const [notifications, setNotifications] = useState(() => getNotifications());
+
 
     const [isContactOpen, setIsContactOpen] = useState(false);
     const [isContactSent, setIsContactSent] = useState(false);
@@ -271,11 +280,21 @@ function Home() {
 
     const [activeCategory, setActiveCategory] = useState("");
 
+    // Mahsulotni "Batafsil" bosilganda ko'rsatiladigan tezkor ko'rish oynasi
+    const [quickViewProduct, setQuickViewProduct] = useState(null);
 
     const [cart, setCart] = useState([]);
 
     useEffect(() => {
         fetchProducts();
+    }, []);
+
+    // Admin panelidan yangi bildirishnoma yozilganda avtomatik yangilanish uchun obuna.
+    useEffect(() => {
+        const unsubscribe = subscribeToNotifications((list) => {
+            setNotifications(list);
+        });
+        return unsubscribe;
     }, []);
 
     const fetchProducts = () => {
@@ -375,13 +394,29 @@ function Home() {
 
     const favoriteProducts = products.filter((p) => favorites.includes(p.id));
 
-    const NOTIFICATIONS = [
-        { id: 1, title: "Buyurtmangiz yo'lda", desc: "Kuryer manzilingiz tomon yo'lga chiqdi.", time: "5 daqiqa oldin" },
-        { id: 2, title: "Yangi chegirma", desc: "Oziq-ovqat toifasida yangi chegirmalar qo'shildi.", time: "1 soat oldin" },
-        { id: 3, title: "Xush kelibsiz!", desc: "MR shoping'da birinchi buyurtmangizga omad tilaymiz.", time: "Kecha" }
-    ];
-
     const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+    const unreadCount = notifications.filter((n) => !n.read).length;
+
+    // Qo'ng'iroq belgisi bosilganda oyna ochiladi va shu payt hammasi "o'qilgan" deb belgilanadi.
+    const handleToggleNotifications = () => {
+        setIsNotificationsOpen((open) => {
+            const next = !open;
+            if (next) markAllAsRead();
+            return next;
+        });
+    };
+
+    function timeAgo(timestamp) {
+        const diffMs = Date.now() - timestamp;
+        const minutes = Math.floor(diffMs / 60000);
+        if (minutes < 1) return "hozirgina";
+        if (minutes < 60) return `${minutes} daqiqa oldin`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours} soat oldin`;
+        const days = Math.floor(hours / 24);
+        if (days === 1) return "kecha";
+        return `${days} kun oldin`;
+    }
 
 
     if (!user) {
@@ -444,13 +479,13 @@ function Home() {
                         <div className="relative hidden sm:block">
                             <button
                                 title="Bildirishnomalar"
-                                onClick={() => {
-                                    setIsNotificationsOpen((o) => !o);
-                                }}
+                                onClick={handleToggleNotifications}
                                 className="relative flex p-2.5 text-slate-500 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 rounded-xl transition-colors"
                             >
                                 <Bell className="w-4 h-4" />
-                                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
+                                {unreadCount > 0 && (
+                                    <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
+                                )}
                             </button>
 
                             {isNotificationsOpen && (
@@ -461,13 +496,19 @@ function Home() {
                                             <h4 className="text-sm font-bold text-slate-900">Bildirishnomalar</h4>
                                         </div>
                                         <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                                            {NOTIFICATIONS.map((n) => (
-                                                <div key={n.id} className="px-4 py-3 hover:bg-slate-50 transition-colors">
-                                                    <p className="text-xs font-bold text-slate-800">{n.title}</p>
-                                                    <p className="text-[11px] text-slate-500 mt-0.5">{n.desc}</p>
-                                                    <p className="text-[10px] text-slate-400 mt-1">{n.time}</p>
+                                            {notifications.length === 0 ? (
+                                                <div className="px-4 py-8 text-center text-xs text-slate-400">
+                                                    Hozircha bildirishnoma yo'q.
                                                 </div>
-                                            ))}
+                                            ) : (
+                                                notifications.map((n) => (
+                                                    <div key={n.id} className="px-4 py-3 hover:bg-slate-50 transition-colors">
+                                                        <p className="text-xs font-bold text-slate-800">{n.title}</p>
+                                                        {n.desc && <p className="text-[11px] text-slate-500 mt-0.5">{n.desc}</p>}
+                                                        <p className="text-[10px] text-slate-400 mt-1">{timeAgo(n.createdAt)}</p>
+                                                    </div>
+                                                ))
+                                            )}
                                         </div>
                                     </div>
                                 </>
@@ -565,7 +606,7 @@ function Home() {
                                     className="bg-white rounded-2xl border border-slate-100 hover:border-indigo-100 hover:shadow-xl hover:shadow-indigo-50/50 transition-all duration-300 flex flex-col group overflow-hidden"
                                 >
                                     <div
-                                        onClick={() => navigate(`/product/${item.id}`)}
+                                        onClick={() => setQuickViewProduct(item)}
                                         className="h-48 bg-slate-100 overflow-hidden cursor-pointer relative"
                                     >
                                         {item.chegirmadagi && (
@@ -589,9 +630,15 @@ function Home() {
                                             className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
                                         />
                                         <div className="absolute inset-0 bg-slate-900/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                            <span className="bg-white/90 backdrop-blur-md text-slate-900 text-xs font-bold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setQuickViewProduct(item);
+                                                }}
+                                                className="bg-white/90 backdrop-blur-md text-slate-900 text-xs font-bold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5"
+                                            >
                                                 <Info className="w-3.5 h-3.5 text-indigo-600" /> Batafsil
-                                            </span>
+                                            </button>
                                         </div>
                                     </div>
 
@@ -599,13 +646,13 @@ function Home() {
                                         <div>
                                             <div className="flex justify-between items-start gap-2 mb-1">
                                                 <h3
-                                                    onClick={() => navigate(`/product/${item.id}`)}
+                                                    onClick={() => setQuickViewProduct(item)}
                                                     className="text-sm font-bold text-slate-800 cursor-pointer hover:text-indigo-600 transition-colors line-clamp-1"
                                                 >
                                                     {item.nomi}
                                                 </h3>
                                                 <span
-                                                    onClick={() => navigate(`/product/${item.id}`)}
+                                                    onClick={() => setQuickViewProduct(item)}
                                                     className="text-[10px] text-slate-400 font-mono bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 px-1.5 py-0.5 rounded shrink-0 cursor-pointer transition-colors"
                                                 >
                                                     #{item.id}
@@ -639,6 +686,72 @@ function Home() {
                     )}
                 </section>
             </main>
+
+            {quickViewProduct && (
+                <div
+                    className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                    onClick={() => setQuickViewProduct(null)}
+                >
+                    <div
+                        className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="relative h-64 bg-slate-100">
+                            {quickViewProduct.chegirmadagi && (
+                                <DiscountTag>{quickViewProduct.chegirmadagi}</DiscountTag>
+                            )}
+                            <button
+                                onClick={() => setQuickViewProduct(null)}
+                                className="absolute top-3 right-3 z-10 p-2 rounded-full bg-white/90 text-slate-600 hover:text-slate-900 shadow-md"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                            <img
+                                src={quickViewProduct.rasm}
+                                alt={quickViewProduct.nomi}
+                                className="h-full w-full object-cover"
+                            />
+                        </div>
+
+                        <div className="p-6 space-y-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <h3 className="text-lg font-bold text-slate-900">{quickViewProduct.nomi}</h3>
+                                <span className="text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded shrink-0">
+                                    ID: #{quickViewProduct.id}
+                                </span>
+                            </div>
+
+                            {quickViewProduct.tavsif && (
+                                <p className="text-sm text-slate-500 leading-relaxed">{quickViewProduct.tavsif}</p>
+                            )}
+
+                            <p className="text-xs text-teal-600 font-medium flex items-center gap-1.5">
+                                <Truck className="w-4 h-4" />
+                                {quickViewProduct.yetkazish || "Standart"} yetkazib berish
+                            </p>
+
+                            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                                <div>
+                                    <span className="text-[11px] text-slate-400 block font-medium">Narxi</span>
+                                    <div className="text-2xl font-extrabold text-indigo-600">
+                                        {quickViewProduct.narxi} <span className="text-sm font-normal text-slate-500">so'm</span>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        addToCart(quickViewProduct);
+                                        setQuickViewProduct(null);
+                                    }}
+                                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold px-5 py-3 rounded-xl shadow-lg shadow-indigo-100 transition-all"
+                                >
+                                    <ShoppingCart className="w-4 h-4" /> Savatga
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {isCartOpen && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-end">
                     <div className="bg-white w-full max-w-md h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
@@ -748,7 +861,7 @@ function Home() {
                                             alt={item.nomi}
                                             onClick={() => {
                                                 setIsFavoritesOpen(false);
-                                                navigate(`/product/${item.id}`);
+                                                setQuickViewProduct(item);
                                             }}
                                             className="w-14 h-14 rounded-xl object-cover cursor-pointer shrink-0"
                                         />
@@ -756,7 +869,7 @@ function Home() {
                                             <h4
                                                 onClick={() => {
                                                     setIsFavoritesOpen(false);
-                                                    navigate(`/product/${item.id}`);
+                                                    setQuickViewProduct(item);
                                                 }}
                                                 className="font-bold text-xs text-slate-800 cursor-pointer hover:text-indigo-600 truncate"
                                             >
